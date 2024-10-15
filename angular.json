@@ -16,6 +16,12 @@
             "outputPath": "dist/promotheus",
             "index": "src/index.html",
             "browser": "src/main.ts",
+            "allowedCommonJsDependencies": [
+              "canvg",
+              "sweetalert2",
+              "html2canvas",
+              "dompurify"
+            ],
             "polyfills": [
               "zone.js"
             ],
@@ -92,5 +98,8 @@
         }
       }
     }
+  },
+  "cli": {
+    "analytics": false
   }
 }
