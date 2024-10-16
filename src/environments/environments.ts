@@ -4,9 +4,9 @@
 
 export const environment = {
   production: false,
-  apiUrl: 'http://43.218.50.75:9090/api/v1/',
-  telegramToken: '7864060958:AAGvKAtDiNb9GCr6JaaZ7Vnh67gAk5k67cQ',
-  telegramChatId: '-4521278263'
+  apiUrl: 'https://monitoring.awh.co.id/api/v1/',
+  telegramToken: '5687228459:AAFmXHDntd-ex_5uoCrv6EnpgEBBGasiwGA',
+  telegramChatId: '-4175229543'
 };
 
 /*
