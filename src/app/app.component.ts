@@ -15,11 +15,21 @@ import Swal from 'sweetalert2';
 })
 export class AppComponent {
   Form!: FormGroup
+
   cpuUsage: any = [];
+  DataCpuAvg: any = []
+
+  query: any;
+  startDate: any;
+  endDate: any
+
   ramUsage: any = [];
   diskUsage: any = [];
   uptime: any = [];
+
   networkUsage: any = [];
+  dataAvgNetwork: any = []
+
   ssl: any = []
   tableHeight: number = 0;
   currentDate: any;
@@ -42,6 +52,24 @@ export class AppComponent {
     } else {
       alert("ERROR FETCH DATA");
     }
+  }
+
+  async getAvgCpu() {
+    this.query = '(sum by(instance) (irate(node_cpu_seconds_total{job="server AWH", mode!="idle"}[5m])) / on(instance) group_left sum by (instance) ((irate(node_cpu_seconds_total{job="server AWH"}[5m])))) * 100'
+    this.startDate = '2024-10-14T12:00:00Z'
+    this.endDate = '2024-10-15T12:00:00Z'
+
+    this.DataCpuAvg = await this.dataService.getAvgData(this.query, this.startDate, this.endDate)
+    console.log(this.DataCpuAvg)
+  }
+
+  async getAvgRam() {
+    this.query = '100 - ((avg_over_time(node_memory_MemAvailable_bytes{job="server AWH"}[5m]) * 100) / avg_over_time(node_memory_MemTotal_bytes{job="server AWH"}[5m]))'
+    this.startDate = '2024-10-13T12:00:00Z'
+    this.endDate = '2024-10-15T12:00:00Z'
+
+
+    console.log(await this.dataService.getAvgData(this.query, this.startDate, this.endDate))
   }
 
   async getRamUsage() {
@@ -75,20 +103,45 @@ export class AppComponent {
     if (downloadData.status === 'success' && uploadData.status === 'success') {
       this.networkUsage = downloadData.data.result.map((item: any) => {
         const instance = item.metric.instance;
-        const download = parseFloat(item.value[1]) / (1024 * 1024); // Konversi ke MB/s
+        const download = parseFloat(item.value[1]) / (1024 * 1024);
         const uploadDataItem = uploadData.data.result.find((uploadItem: any) => uploadItem.metric.instance === instance);
-        const upload = uploadDataItem ? parseFloat(uploadDataItem.value[1]) / (1024 * 1024) : 0; // Konversi ke MB/s
+        const upload = uploadDataItem ? parseFloat(uploadDataItem.value[1]) / (1024 * 1024) : 0;
 
         return {
           instance: instance,
           download: download,
           upload: upload,
-          totalUsage: download + upload // Menghitung total usage
+          totalUsage: download + upload
         };
       });
     } else {
       alert("ERROR FETCH DATA");
     }
+  }
+
+  async getAvgNetwork() {
+    const queryDownload = 'irate(node_network_receive_bytes_total{job="server AWH",device="ens5"}[5m])*8';
+    const queryUpload = 'irate(node_network_transmit_bytes_total{job="server AWH", device="ens5"}[5m])*8';
+
+    this.startDate = '2024-10-14T12:00:00Z';
+    this.endDate = '2024-10-15T12:00:00Z';
+
+    const dataDownload = await this.dataService.getAvgData(queryDownload, this.startDate, this.endDate);
+    const dataUpload = await this.dataService.getAvgData(queryUpload, this.startDate, this.endDate);
+
+    // Gabungkan data download dan upload berdasarkan instance
+    const mergedData = dataDownload.map((download: any) => {
+      // Cari instance yang cocok di data upload
+      const upload = dataUpload.find((upload: any) => upload.instance === download.instance);
+
+      return {
+        instance: download.instance,
+        downloadAverage: download.average,
+        uploadAverage: upload ? upload.average : 0
+      };
+    });
+
+    console.log('Merged Data:', mergedData);
   }
 
   async getUptime() {
@@ -156,6 +209,14 @@ export class AppComponent {
     this.getUptime();
     this.getNetworkUsage()
     this.getSSL();
+    this.getAvgCpu()
+    this.getAvgNetwork()
+    this.getAvgRam()
+  }
+
+  getAvgCpuForInstance(instance: string): number {
+    const cpuData = this.DataCpuAvg.find((r: any) => r.instance === instance)
+    return cpuData ? cpuData.average : 0
   }
 
   getDiskUsageForInstance(instance: string): number {
@@ -181,11 +242,18 @@ export class AppComponent {
   async sendTele() {
     try {
       if (this.Form.valid) {
-        const header = `REPORT ACTIVITY SYSNET \n` +
-          `Periode : ${this.currentDate} \n` +
-          `Shift : ${this.Form.value.shift} \n` +
-          ` \n` +
-          `Daily Activity \n` +
+        const header = `REPORT ACTIVITY SYSNET\n` +
+          `Periode: ${this.currentDate}\n` +
+          `Shift: ${this.Form.value.shift}\n\n` +
+          `Issue/Request from Internal:\n` +
+          `${this.Form.value.issue || 'N/A'}\n\n` +
+          `Ticketing Open:\n` +
+          `${this.Form.value.ticket || 'N/A'}\n\n` +
+          `Activity:\n` +
+          `${this.Form.value.activity || 'N/A'}\n\n` +
+          `Reminder:\n` +
+          `${this.Form.value.reminder || 'N/A'}\n\n` +
+          `Daily Activity\n` +
           `*Data All Server:*\n`;
 
         // Loop hanya untuk mendapatkan informasi dari cpuUsage
@@ -194,7 +262,6 @@ export class AppComponent {
           const networkTransmit = this.getNetworkUsageForInstance(usage.instance).upload;
           const totalNetworkUsage = networkReceive + networkTransmit;
 
-          // Periksa apakah nilai tidak undefined sebelum menggunakan
           const ramUsage = this.getRamUsageForInstance(usage.instance)?.toFixed(1) || 'N/A';
           const diskUsage = this.getDiskUsageForInstance(usage.instance)?.toFixed(1) || 'N/A';
           const uptime = this.getUptimeForInstance(usage.instance) || 'N/A';
@@ -203,75 +270,97 @@ export class AppComponent {
             `   - CPU Used: ${usage.usage.toFixed(1)}%\n` +
             `   - RAM Used: ${ramUsage}%\n` +
             `   - Total Network Usage: ${(totalNetworkUsage).toFixed(1)} MB/s\n` +
-            `   - Disk Usage: ${diskUsage} %\n` +
-            `   - Uptime: ${uptime}\n` +
-            `\n`;
+            `   - Disk Usage: ${diskUsage}%\n` +
+            `   - Uptime: ${uptime}\n\n`;
         });
 
-        await this.getSSL();
+        await this.getSSL(); // Pastikan SSL sudah diambil sebelum digunakan
 
         // Format pesan SSL
         const sslLines = this.ssl.map((sslData: any, index: number) => {
+          const daysLeft = this.calculateDaysLeft(sslData.expiryDate); // Menghitung sisa hari
+          const expiryMessage = daysLeft > 0
+            ? `SSL akan kedaluwarsa dalam ${daysLeft} hari.\n`
+            : `SSL telah kadaluwarsa.\n`;
+
           return `${index + 1}. ${sslData.instance}\n` +
-            `   - SSL Expiry: ${sslData.expiryDate}\n` +
-            `\n`;
+            `   - ${expiryMessage}` +
+            `   - SSL Expiry: ${sslData.expiryDate}\n\n`;
         });
 
         // Gabungkan bagian header dengan messageLines dan sslLines
         const formattedMessage = header + messageLines.join('') +
-          `*Masa Tenggang SSL:*\n` + sslLines.join('') +
-          `Issue/Request from Internal: ${this.Form.value.issue || 'N/A'}\n` +
-          `\n` +
-          `Ticketing Open: ${this.Form.value.ticket || 'N/A'}\n` +
-          `\n` +
-          `Activity: ${this.Form.value.activity || 'N/A'}\n` +
-          `\n` +
-          `Reminder: ${this.Form.value.reminder || 'N/A'}\n`;
+          `*Masa Tenggang SSL:*\n` + sslLines.join('');
 
         // Kirim pesan dengan parse_mode
         try {
           const data = await this.dataService.sendMessage(formattedMessage);
           console.log(data);
+          if (data.ok) {
+            Swal.fire({
+              title: "Pesan Berhasil dikirim !",
+              text: "Pesan berhasil dikirim melalui telegram !",
+              icon: "success"
+            });
+          }
         } catch (error) {
           console.error("Error sending message:", error);
+          Swal.fire({
+            title: "Mengirim Pesan Gagal!",
+            text: "Pesan gagal dikirimkan melalui Telegram!",
+            icon: "error"
+          });
         }
       } else {
-        alert("Form tidak valid");
+        Swal.fire({
+          title: "Form tidak valid!",
+          text: "Harap lengkapi semua kolom yang diperlukan.",
+          icon: "error"
+        });
       }
     } catch (error) {
+      console.error("Error in sendTele:", error); // Log kesalahan
       Swal.fire({
-        title: "Mengirim Pesan Gagal !",
-        text: "Pesan gagal dikirimkan melalui telegram!",
+        title: "Mengirim Pesan Gagal!",
+        text: "Pesan gagal dikirimkan melalui Telegram!",
         icon: "error"
-      });
-    } finally {
-      Swal.fire({
-        title: "Mengirim Pesan Berhasil!",
-        text: "Pesan sudah dikirimkan melalui telegram!",
-        icon: "success"
       });
     }
   }
 
+
+  // Fungsi untuk menghitung sisa hari hingga kedaluwarsa
+  calculateDaysLeft(expiryDateStr: any) {
+    const expiryDate: any = new Date(expiryDateStr);
+    const currentDate: any = new Date();
+    const timeDifference = expiryDate - currentDate;
+    return Math.floor(timeDifference / (1000 * 60 * 60 * 24));
+  }
+
+
   generatePDF() {
     try {
       if (this.Form.valid) {
-        this.createPdf()
+        this.createPdf(); // Panggil metode untuk membuat PDF
+        Swal.fire({
+          title: "Laporan Berhasil Dicetak !",
+          text: "Pesan sudah dicetak menjadi PDF !",
+          icon: "success"
+        });
       } else {
-        alert('Form is not valid')
+        Swal.fire({
+          title: "Form tidak valid!",
+          text: "Harap lengkapi semua kolom yang diperlukan.",
+          icon: "error"
+        });
       }
     } catch (error) {
       Swal.fire({
         title: "Laporan Gagal Dicetak !",
-        text: "Pesan sudah dicetak menjadi PDF !",
+        text: "Terjadi kesalahan saat mencetak laporan menjadi PDF.",
         icon: "error"
       });
-    } finally {
-      Swal.fire({
-        title: "Laporan Berhasil Dicetak !",
-        text: "Pesan sudah dicetak menjadi PDF !",
-        icon: "success"
-      });
+      console.error("Error generating PDF:", error); // Log kesalahan di konsol untuk debugging
     }
   }
 
@@ -337,15 +426,32 @@ export class AppComponent {
     currentY += 5;
 
     this.ssl.forEach((ssl: any, index: any) => {
+      const expiryDateStr = ssl.expiryDate;
+      const expiryDate: any = new Date(expiryDateStr);
+      const currentDate: any = new Date();
+
+      const timeDifference = expiryDate - currentDate;
+      const daysLeft = Math.floor(timeDifference / (1000 * 60 * 60 * 24));
+
       if (currentY > 260) {
         doc.addPage();
         currentY = 10;
       }
       doc.setFontSize(10);
+
       doc.text(`${index + 1}. ${ssl.instance}`, 10, currentY);
       currentY += 5;
-      doc.text(`   - SSL Expiry: ${ssl.expiryDate}`, 10, currentY);
-      currentY += 10;
+      if (daysLeft > 0) {
+        doc.text(`   - SSL akan kedaluwarsa dalam ${daysLeft} hari.`, 10, currentY);
+        currentY += 5;
+        doc.text(`   - SSL Expiry: ${ssl.expiryDate}`, 10, currentY);
+        currentY += 10;
+      } else {
+        doc.text(`   - SSL telah kadaluwarsa.`, 10, currentY);
+        currentY += 5;
+        doc.text(`   - SSL Expiry: ${ssl.expiryDate}`, 10, currentY);
+        currentY += 10;
+      }
     });
 
     // Menambahkan issue, ticketing, activity, reminder
@@ -373,9 +479,5 @@ export class AppComponent {
 
     doc.save(`Laporan_Penggunaan_Server.pdf`);
   }
-
-
-
-
 
 }

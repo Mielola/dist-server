@@ -25,6 +25,39 @@ export class AppService {
       )
   }
 
+  async getAvgData(query: string, start: any, end: any): Promise<any> {
+    return await axios.get(`${this.apiUrl}query_range`, {
+      params: {
+        query: query,
+        start: start,
+        end: end,
+        step: '1h'
+      }
+    }).then(
+      async response => {
+        return this.calculateAverage(response.data)
+      }).catch(
+        async error => {
+          console.error(error);
+        }
+      )
+
+  }
+
+  private calculateAverage(data: any): any {
+    const servers = data.data.result;
+    const averages = servers.map((server: any) => {
+      const values = server.values.map((val: any) => parseFloat(val[1]));
+      const total = values.reduce((acc: number, curr: number) => acc + curr, 0);
+      const average = total / values.length;
+      return {
+        instance: server.metric.instance,
+        average: average
+      };
+    });
+    return averages;
+  }
+
   async sendMessage(message: string) {
     const data = {
       chat_id: this.teleChatId,
